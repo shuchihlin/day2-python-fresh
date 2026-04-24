@@ -92,3 +92,44 @@ def auth_middleware(f):
 @auth_middleware
 def protected_route(auth_header="", user=None):
     return {"message": f"Hello, {user['email']}"}
+
+
+def request_password_reset(email):
+    """Generate a password reset token for the given email."""
+    if not email or email not in _users:
+        return {"error": "User not found"}
+
+    payload = {
+        "email": email,
+        "type": "password_reset",
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=30),
+    }
+
+    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    return {"token": token, "email": email, "expires_in": 1800}
+
+
+def verify_and_reset_password(token, new_password):
+    """Verify reset token and update password."""
+    if not token or not new_password:
+        return {"error": "Token and password required"}
+
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except Exception:
+        return {"error": "Invalid or expired token"}
+
+    if payload.get("type") != "password_reset":
+        return {"error": "Invalid token type"}
+
+    email = payload.get("email")
+    if not email or email not in _users:
+        return {"error": "Invalid or expired token"}
+
+    from src.validators import is_strong_password
+    if not is_strong_password(new_password):
+        return {"error": "Password does not meet strength requirements"}
+
+    _users[email]["password"] = _hash_password(new_password)
+    return {"success": True, "message": "Password reset complete"}

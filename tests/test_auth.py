@@ -10,6 +10,8 @@ from src.auth import (
     verify,
     auth_middleware,
     protected_route,
+    request_password_reset,
+    verify_and_reset_password,
     _users,
     JWT_SECRET,
 )
@@ -141,3 +143,80 @@ class TestTokenExpiry:
         payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
         assert "exp" in payload
         assert "iat" in payload
+
+
+class TestPasswordReset:
+    def setup_method(self):
+        _users.clear()
+        register("reset@example.com", "OldPass123!")
+
+    def test_request_reset_success(self):
+        result = request_password_reset("reset@example.com")
+        assert "token" in result
+        assert result["email"] == "reset@example.com"
+        assert result["expires_in"] == 1800
+
+    def test_request_reset_nonexistent_user(self):
+        result = request_password_reset("nonexistent@example.com")
+        assert "error" in result
+
+    def test_request_reset_empty_email(self):
+        result = request_password_reset("")
+        assert "error" in result
+
+    def test_reset_password_success(self):
+        reset_result = request_password_reset("reset@example.com")
+        token = reset_result["token"]
+        result = verify_and_reset_password(token, "NewPass123!")
+        assert result["success"] is True
+
+    def test_reset_password_then_login_with_new_password(self):
+        reset_result = request_password_reset("reset@example.com")
+        token = reset_result["token"]
+        verify_and_reset_password(token, "NewPass123!")
+
+        login_result = login("reset@example.com", "NewPass123!")
+        assert "token" in login_result
+
+    def test_reset_password_old_password_no_longer_works(self):
+        reset_result = request_password_reset("reset@example.com")
+        token = reset_result["token"]
+        verify_and_reset_password(token, "NewPass123!")
+
+        login_result = login("reset@example.com", "OldPass123!")
+        assert "error" in login_result
+
+    def test_reset_with_invalid_token(self):
+        result = verify_and_reset_password("invalid.token.here", "NewPass123!")
+        assert "error" in result
+
+    def test_reset_with_weak_password(self):
+        reset_result = request_password_reset("reset@example.com")
+        token = reset_result["token"]
+        result = verify_and_reset_password(token, "weak")
+        assert "error" in result
+
+    def test_reset_token_has_password_reset_type(self):
+        reset_result = request_password_reset("reset@example.com")
+        token = reset_result["token"]
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        assert payload.get("type") == "password_reset"
+
+    def test_reset_token_30_minute_expiry(self):
+        reset_result = request_password_reset("reset@example.com")
+        token = reset_result["token"]
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        iat = payload["iat"]
+        exp = payload["exp"]
+        expiry_minutes = (exp - iat) / 60
+        assert expiry_minutes == 30
+
+    def test_reset_with_missing_token(self):
+        result = verify_and_reset_password("", "NewPass123!")
+        assert "error" in result
+
+    def test_reset_with_missing_password(self):
+        reset_result = request_password_reset("reset@example.com")
+        token = reset_result["token"]
+        result = verify_and_reset_password(token, "")
+        assert "error" in result
