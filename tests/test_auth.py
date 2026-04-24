@@ -13,6 +13,7 @@ from src.auth import (
     request_password_reset,
     verify_and_reset_password,
     _users,
+    _reset_attempts,
     JWT_SECRET,
 )
 
@@ -148,6 +149,7 @@ class TestTokenExpiry:
 class TestPasswordReset:
     def setup_method(self):
         _users.clear()
+        _reset_attempts.clear()
         register("reset@example.com", "OldPass123!")
 
     def test_request_reset_success(self):
@@ -220,3 +222,25 @@ class TestPasswordReset:
         token = reset_result["token"]
         result = verify_and_reset_password(token, "")
         assert "error" in result
+
+    def test_reset_rate_limit_allows_5_requests(self):
+        for i in range(5):
+            result = request_password_reset("reset@example.com")
+            assert "token" in result
+
+    def test_reset_rate_limit_blocks_6th_request(self):
+        for i in range(5):
+            request_password_reset("reset@example.com")
+
+        result = request_password_reset("reset@example.com")
+        assert "error" in result
+        assert result["error"] == "Too many reset requests"
+
+    def test_reset_rate_limit_per_email(self):
+        register("other@example.com", "OtherPass123!")
+
+        for i in range(5):
+            request_password_reset("reset@example.com")
+
+        result = request_password_reset("other@example.com")
+        assert "token" in result

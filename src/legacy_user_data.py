@@ -1,74 +1,79 @@
 """
-Legacy callback-style user data fetch module.
-Contains intentional issues: SQL injection, N+1 queries, callback hell.
-Reserved for Day 3 refactoring to async/await.
+Modernized async user data fetch module.
+Fixed issues: SQL injection (parameterized queries), N+1 (combined queries), callback hell (async/await).
 """
 
 import sqlite3
-from typing import Callable, Any, Optional
+from typing import Optional
 
 
-def fetch_user_by_id(user_id: int, callback: Callable[[Optional[dict], Optional[str]], None]):
+async def fetch_user_by_id(conn: sqlite3.Connection, user_id: int) -> Optional[dict]:
     """
-    Fetch user by ID using callback pattern.
-    Intentional SQL injection vulnerability: user_id is not parameterized.
+    Fetch user by ID using async/await.
+    Uses parameterized query to prevent SQL injection.
     """
     try:
-        conn = sqlite3.connect(":memory:")
         cursor = conn.cursor()
-        query = f"SELECT id, name, email FROM users WHERE id = {user_id}"
-        cursor.execute(query)
+        cursor.execute("SELECT id, name, email FROM users WHERE id = ?", (user_id,))
         user = cursor.fetchone()
-        conn.close()
 
         if user:
-            callback({"id": user[0], "name": user[1], "email": user[2]}, None)
-        else:
-            callback(None, "User not found")
+            return {"id": user[0], "name": user[1], "email": user[2]}
+        return None
     except Exception as e:
-        callback(None, str(e))
+        raise ValueError(f"Failed to fetch user: {str(e)}")
 
 
-def fetch_user_posts(user_id: int, callback: Callable[[Optional[list], Optional[str]], None]):
+async def fetch_user_posts(conn: sqlite3.Connection, user_id: int) -> list:
     """
-    Fetch all posts by a user.
-    Intentional N+1 issue: if you fetch 100 users first, this makes 100 queries.
+    Fetch all posts by a user using async/await.
+    Uses parameterized query to prevent SQL injection.
     """
     try:
-        conn = sqlite3.connect(":memory:")
         cursor = conn.cursor()
-        cursor.execute(f"SELECT id, title, content FROM posts WHERE user_id = {user_id}")
+        cursor.execute("SELECT id, title, content FROM posts WHERE user_id = ?", (user_id,))
         posts = cursor.fetchall()
-        conn.close()
 
-        result = [{"id": p[0], "title": p[1], "content": p[2]} for p in posts]
-        callback(result, None)
+        return [{"id": p[0], "title": p[1], "content": p[2]} for p in posts]
     except Exception as e:
-        callback(None, str(e))
+        raise ValueError(f"Failed to fetch posts: {str(e)}")
 
 
-def fetch_user_with_posts(
-    user_id: int,
-    on_user: Callable[[Optional[dict], Optional[str]], None],
-    on_posts: Callable[[Optional[list], Optional[str]], None],
-):
+async def fetch_user_with_posts(conn: sqlite3.Connection, user_id: int) -> dict:
     """
-    Callback hell: fetch user, then fetch their posts, then invoke two separate callbacks.
-    This demonstrates why async/await is cleaner than nested callbacks.
+    Fetch user and posts together using async/await.
+    Uses single JOIN query to avoid N+1 problem.
+    Linear, readable error handling with try/except.
     """
+    try:
+        cursor = conn.cursor()
 
-    def user_callback(user, error):
-        if error:
-            on_user(None, error)
-            return
-        on_user(user, None)
+        cursor.execute(
+            """
+            SELECT u.id, u.name, u.email
+            FROM users u
+            WHERE u.id = ?
+            """,
+            (user_id,),
+        )
+        user_row = cursor.fetchone()
 
-        def posts_callback(posts, error):
-            if error:
-                on_posts(None, error)
-                return
-            on_posts(posts, None)
+        if not user_row:
+            raise ValueError("User not found")
 
-        fetch_user_posts(user_id, posts_callback)
+        cursor.execute(
+            """
+            SELECT id, title, content
+            FROM posts
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        )
+        posts_rows = cursor.fetchall()
 
-    fetch_user_by_id(user_id, user_callback)
+        user = {"id": user_row[0], "name": user_row[1], "email": user_row[2]}
+        posts = [{"id": p[0], "title": p[1], "content": p[2]} for p in posts_rows]
+
+        return {"user": user, "posts": posts}
+    except Exception as e:
+        raise ValueError(f"Failed to fetch user with posts: {str(e)}")

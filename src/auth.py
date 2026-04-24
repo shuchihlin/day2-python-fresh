@@ -11,10 +11,25 @@ if not JWT_SECRET:
 TOKEN_EXPIRY = "1h"
 
 _users = {}
+_reset_attempts = {}  # Track password reset attempts: email -> [timestamps]
 
 
 def _hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
+
+
+def _cleanup_old_attempts(email):
+    """Remove timestamps older than 1 hour from reset attempts."""
+    now = datetime.now(timezone.utc)
+    one_hour_ago = now - timedelta(hours=1)
+
+    if email in _reset_attempts:
+        _reset_attempts[email] = [
+            ts for ts in _reset_attempts[email]
+            if ts > one_hour_ago
+        ]
+        if not _reset_attempts[email]:
+            del _reset_attempts[email]
 
 
 def register(email, password):
@@ -98,6 +113,16 @@ def request_password_reset(email):
     """Generate a password reset token for the given email."""
     if not email or email not in _users:
         return {"error": "User not found"}
+
+    _cleanup_old_attempts(email)
+
+    if email in _reset_attempts and len(_reset_attempts[email]) >= 5:
+        return {"error": "Too many reset requests"}
+
+    now = datetime.now(timezone.utc)
+    if email not in _reset_attempts:
+        _reset_attempts[email] = []
+    _reset_attempts[email].append(now)
 
     payload = {
         "email": email,
