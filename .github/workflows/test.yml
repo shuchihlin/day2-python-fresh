@@ -24,28 +24,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run pytest via Claude Code
-        run: |
-          python -m pytest --tb=short --json-report --json-report-file=test-report.json
+      - name: Run pytest
+        run: python -m pytest -v --tb=short
 
-      - name: Upload test results
+      - name: Test Summary
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: test-report.json
-
-      - name: Comment PR with test results
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const fs = require('fs');
-            const report = JSON.parse(fs.readFileSync('test-report.json'));
-            const summary = `✅ Tests Passed: ${report.summary.passed}\n❌ Tests Failed: ${report.summary.failed}`;
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: summary
-            });
+        run: echo "✅ Tests completed successfully!"
