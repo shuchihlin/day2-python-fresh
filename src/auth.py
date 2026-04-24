@@ -75,7 +75,7 @@ def auth_middleware(f):
 
         scheme, token = parts[0], parts[1]
 
-        if scheme != "Bearer":
+        if scheme != "bearer":
             return {"error": "Invalid authorization scheme"}
 
         result = verify(token)
