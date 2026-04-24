@@ -18,6 +18,7 @@ def _hash_password(password):
 
 
 def register(email, password):
+    """Register a new user with email and password."""
     if not email or not password:
         return {"error": "Email and password required"}
 
